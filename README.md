@@ -54,7 +54,8 @@ flags those operators as not moving; record the motion first.
   - the ranking, worst first;
   - **go to worst**, which moves the timeline to the moment and selects the operator;
   - **Markers on / off**, on the session layer, so they are never saved into the scene;
-  - **Open dashboard**.
+  - **Open dashboard**;
+  - **Live panel** / **Window > Ergo Live**: score cards per operator that update while the timeline plays.
 
   The same scan from the Script Editor:
 

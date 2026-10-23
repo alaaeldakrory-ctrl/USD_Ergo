@@ -71,6 +71,10 @@ Then use the other buttons:
 - **Markers on / off** shows a sphere above each head, coloured by risk over time, plus dots on the back,
   shoulders and knees. The markers go on the session layer, so they are never saved into the scene.
 - **Open dashboard** opens `ergo_dashboard.html` in the browser. **Open folder** opens all the outputs.
+- **Live panel** (also **Window > Ergo Live**) shows one card per operator that updates while the timeline plays or
+  is scrubbed. Each card has the RULA badge, band, angles, body parts coloured by score, and the last 20 s chart.
+  It needs no scan first. It scores the pose in the stage at the current time, so it also follows animation your
+  Python writes into USD while playing. It takes about 3 ms per frame for 15 operators.
 
 ### Without the window
 

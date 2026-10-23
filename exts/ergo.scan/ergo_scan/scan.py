@@ -528,3 +528,66 @@ def _overlay(res, path):
                         c2.Set(Vt.Vec3fArray([Gf.Vec3f(*c)]), tc)
                         lastc = c
     st.GetRootLayer().Save()
+
+
+class LiveScorer:
+    """Scores every operator at any time code, one frame at a time (for a live panel while the timeline plays).
+    Reads the poses from the stage at that time, so it also follows animation written into USD while playing.
+
+        live = LiveScorer(stage, "/World")
+        rows = live.at(time_code)          # {operator: row dict as in scan() (score, part scores, angles, walking)}
+    """
+
+    def __init__(self, stage, root="/World", loads=None, repeated=(), mapping=None, walk_cap=True):
+        from pxr import Usd, UsdSkel
+        self.stage = stage
+        self.conv, self.k, self.zup = _to_cm_yup(stage)
+        self.fps = stage.GetTimeCodesPerSecond() or 24.0
+        self.loads, self.repeated, self.walk_cap = loads or {}, set(repeated or ()), walk_cap
+        self.ops, self.skipped = [], {}
+        cache = UsdSkel.Cache()
+        for name, sr, sk in find_operators(stage, root):
+            cache.Populate(UsdSkel.Root(sr), Usd.TraverseInstanceProxies())
+            q = cache.GetSkelQuery(UsdSkel.Skeleton(sk))
+            joints = [str(j) for j in q.GetJointOrder()]
+            ov = mapping.get(name, mapping) if mapping else None
+            ov = ov if isinstance(ov, dict) and all(isinstance(v, str) for v in ov.values()) else None
+            idx = map_joints(joints, ov)
+            missing = [r for r in REQUIRED if r not in idx]
+            if missing:
+                self.skipped[name] = missing
+                continue
+            bind = q.GetJointWorldBindTransforms()
+            Jb = {r: self.conv(np.array(bind[i].ExtractTranslation())) for r, i in idx.items()}
+            try:
+                ab = frame_angles(Jb)
+                up = abs(ab["trunk"]) < 20
+            except Exception:
+                ab, up = None, False
+            rest = {"trunk": abs(ab["trunk"]) if up else 0.0, "neck": abs(ab["neck"]) if up else 0.0,
+                    "wrist_l": ab["wrist_l"] if ab else 0.0, "wrist_r": ab["wrist_r"] if ab else 0.0}
+            self.ops.append({"name": name, "path": str(sr.GetPath()), "q": q, "idx": idx, "rest": rest, "hist": []})
+
+    def at(self, time_code):
+        from pxr import Usd, UsdGeom
+        xc = UsdGeom.XformCache(Usd.TimeCode(float(time_code)))
+        out = {}
+        for op in self.ops:
+            W = op["q"].ComputeJointWorldTransforms(xc)
+            J = {r: self.conv(np.array(W[i].ExtractTranslation())) for r, i in op["idx"].items()}
+            name = op["name"]
+            row = score(frame_angles(J), op["rest"], float(self.loads.get(name, 0.0)), name in self.repeated)
+            h = op["hist"]                                          # pelvis track for the walking test
+            h.append((float(time_code), J["pelvis"]))
+            while len(h) > 2 and h[-1][0] - h[0][0] > 0.3 * self.fps:
+                h.pop(0)
+            if h[-1][0] < h[0][0]:                                  # the timeline jumped back: start over
+                del h[:-1]
+            dt = (h[-1][0] - h[0][0]) / self.fps
+            v = float(np.hypot(*(h[-1][1] - h[0][1])[[0, 2]]) / dt) if dt > 1e-6 else 0.0
+            row["walking"] = v > 40.0
+            if self.walk_cap and row["walking"] and not self.loads.get(name):
+                row["score"] = min(row["score"], 2)
+            row["frame"] = float(time_code)
+            out[name] = row
+        return out

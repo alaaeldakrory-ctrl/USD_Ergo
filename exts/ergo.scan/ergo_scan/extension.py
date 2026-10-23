@@ -86,6 +86,7 @@ class ErgoWindow:
                     ui.Button("Markers on / off", clicked_fn=self.toggle_markers)
                     ui.Button("Open dashboard", clicked_fn=self.open_dashboard)
                     ui.Button("Open folder", clicked_fn=self.open_folder)
+                    ui.Button("Live panel", clicked_fn=self.open_live)
                 self.progress = ui.ProgressBar(height=14).model
                 self.status = ui.Label("", height=40, word_wrap=True)
                 self.table = ui.VStack(spacing=2, height=0)
@@ -229,6 +230,13 @@ class ErgoWindow:
         else:
             self.status.text = "No dashboard yet - run the scan first."
 
+    def open_live(self):
+        """Window > Ergo Live, with this window's root prim, loads and repeated work."""
+        o = self._opts()
+        w = show_live()
+        if w is not None:
+            w.reset(o["root"], o["loads"], o["repeated"])
+
     def open_folder(self):
         p = self.out_dir or self.m_out.get_value_as_string()
         if os.path.isdir(p):
@@ -248,11 +256,13 @@ class ErgoScanExtension(omni.ext.IExt):
         try:
             import omni.kit.menu.utils as mu
             from omni.kit.menu.utils import MenuItemDescription
-            self._menu = [MenuItemDescription(name=TITLE, onclick_fn=self.show)]
+            self._menu = [MenuItemDescription(name=TITLE, onclick_fn=self.show),
+                          MenuItemDescription(name="Ergo Live", onclick_fn=self.show_live)]
             mu.add_menu_items(self._menu, "Window")
         except ImportError:                                           # an app without the menu: E.show() from a script
             carb.log_warn("[ergo.scan] no omni.kit.menu.utils: open the window with ergo_scan.extension.show()")
         ui.Workspace.set_show_window_fn(TITLE, lambda visible: self.show() if visible else None)
+        self._live = None
         global _EXT
         _EXT = self
 
@@ -262,6 +272,14 @@ class ErgoScanExtension(omni.ext.IExt):
         self._window.window.visible = True
         self._window.window.focus()
         return self._window
+
+    def show_live(self, *_):
+        from .live import LiveWindow
+        if self._live is None:
+            self._live = LiveWindow()
+        self._live.window.visible = True
+        self._live.window.focus()
+        return self._live
 
     def on_shutdown(self):
         global _EXT
@@ -273,6 +291,9 @@ class ErgoScanExtension(omni.ext.IExt):
         if self._window:
             self._window.destroy()
             self._window = None
+        if self._live:
+            self._live.destroy()
+            self._live = None
 
 
 _EXT = None
@@ -281,3 +302,8 @@ _EXT = None
 def show():
     """Open the window from a script: ergo_scan.extension.show() -> the ErgoWindow."""
     return _EXT.show() if _EXT else None
+
+
+def show_live():
+    """Open the live panel from a script: ergo_scan.extension.show_live() -> the LiveWindow."""
+    return _EXT.show_live() if _EXT else None

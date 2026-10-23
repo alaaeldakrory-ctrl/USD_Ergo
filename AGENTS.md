@@ -7,7 +7,8 @@ dashboards. If you are an AI agent asked to assess operators, follow **`docs/AGE
 |---|---|
 | Command line | `tools/ergo_scan.py` (`--list` first; prints JSON) |
 | Python | `exts/ergo.scan/ergo_scan/scan.py`: `scan()` and `write_report()`; dashboards in `dash.py`; RULA tables in `rula.py` |
-| Kit | extension `ergo.scan` (search path `<repo>/exts`); then `from ergo_scan import scan` |
+| Kit | extension `ergo.scan` (search path `<repo>/exts`): Window > Ergo Scan; scripts: `from ergo_scan import scan`; headless: `tools/kit_scan.py` |
+| Offline installs | `wheels/` (usd-core, numpy, Pillow for Python 3.10-3.12, Windows) |
 | Tests | `python -m pytest tests` |
 
 Rules:

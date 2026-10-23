@@ -261,6 +261,15 @@ def scan(stage, root="/World", step=1, frames=None, loads=None, repeated=(), map
     """Score every operator. frames: (start, end) in stage time codes (default: the stage's range).
     loads: {operator: kg} handled while working; repeated: operators doing repeated cycles (+1 muscle use);
     mapping: {role: joint name} (or {operator: {role: joint name}}) for unusual rigs."""
+    for ev in scan_iter(stage, root, step, frames, loads, repeated, mapping, walk_cap, only, log):
+        if ev[0] == "done":
+            return ev[1]
+
+
+def scan_iter(stage, root="/World", step=1, frames=None, loads=None, repeated=(), mapping=None, walk_cap=True,
+              only=None, log=print):
+    """scan() step by step, for a UI that stays responsive: yields ("progress", operator name, operator index,
+    operator count, fraction of this operator done) every few dozen frames, then ("done", result)."""
     from pxr import Usd, UsdGeom, UsdSkel
     conv, k, zup = _to_cm_yup(stage)
     t0, t1 = frames or (stage.GetStartTimeCode(), stage.GetEndTimeCode())
@@ -271,9 +280,9 @@ def scan(stage, root="/World", step=1, frames=None, loads=None, repeated=(), map
     loads, repeated = loads or {}, set(repeated or ())
     cache = UsdSkel.Cache()
     ops = []
-    for name, sr, sk in find_operators(stage, root):
-        if only and name not in only:
-            continue
+    found = [f for f in find_operators(stage, root) if not only or f[0] in only]
+    for n_op, (name, sr, sk) in enumerate(found):
+        yield ("progress", name, n_op, len(found), 0.0)
         cache.Populate(UsdSkel.Root(sr), Usd.TraverseInstanceProxies())
         q = cache.GetSkelQuery(UsdSkel.Skeleton(sk))
         joints = [str(j) for j in q.GetJointOrder()]
@@ -298,7 +307,9 @@ def scan(stage, root="/World", step=1, frames=None, loads=None, repeated=(), map
                 "wrist_l": ab["wrist_l"] if ab else 0.0, "wrist_r": ab["wrist_r"] if ab else 0.0}
         prev = []
         xc = UsdGeom.XformCache()
-        for t in times:
+        for n_t, t in enumerate(times):
+            if n_t % 40 == 39:
+                yield ("progress", name, n_op, len(found), n_t / len(times))
             xc.SetTime(Usd.TimeCode(float(t)))
             W = q.ComputeJointWorldTransforms(xc)
             J = {r: conv(np.array(W[i].ExtractTranslation())) for r, i in idx.items()}
@@ -323,8 +334,8 @@ def scan(stage, root="/World", step=1, frames=None, loads=None, repeated=(), map
         op["static"] = bool(len(P) > 1 and float(np.ptp(P, axis=0).max()) * k < 0.5)   # nothing moves in USD
         log(f"{name}: {len(op['rows'])} frames, max RULA {max(r['score'] for r in op['rows'])}"
             + ("  (STATIC: no animation stored in USD)" if op["static"] else ""))
-    return {"stage": stage.GetRootLayer().identifier, "fps": fps, "step": step, "range": [t0, t1],
-            "units_cm": k, "z_up": zup, "operators": ops}
+    yield ("done", {"stage": stage.GetRootLayer().identifier, "fps": fps, "step": step, "range": [t0, t1],
+                    "units_cm": k, "z_up": zup, "operators": ops})
 
 
 def _smooth(v, r=5):

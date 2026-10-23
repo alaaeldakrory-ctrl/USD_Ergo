@@ -48,8 +48,15 @@ flags those operators as not moving; record the motion first.
 ## Install
 
 - **Outside Kit:** Python 3.10+ with `pip install usd-core numpy pillow`.
-- **Inside Kit:** add `<repo>/exts` to the extension search paths and enable **ergo.scan**. Then, in the Script
-  Editor:
+- **Inside Kit:** add `<repo>/exts` to the extension search paths and enable **ergo.scan**. Then open
+  **Window > Ergo Scan**:
+  - **List operators** and **Run scan**;
+  - the ranking, worst first;
+  - **go to worst**, which moves the timeline to the moment and selects the operator;
+  - **Markers on / off**, on the session layer, so they are never saved into the scene;
+  - **Open dashboard**.
+
+  The same scan from the Script Editor:
 
   ```python
   import omni.usd
@@ -58,5 +65,9 @@ flags those operators as not moving; record the motion first.
   scan.write_report(res, r"C:/out/ergo")
   ```
 
-- **Air-gapped PC:** run `python tools/make_offline_bundle.py` on a connected PC. It makes one zip with the code
-  and the wheels. On the offline PC, run `pip install --no-index --find-links <unzipped>/wheels usd-core numpy pillow`.
+- **Headless with Kit's own Python:** use `tools/kit_scan.py`. Nothing needs installing.
+- **Offline PCs:** everything is in this repository. `wheels/` holds usd-core, numpy and Pillow for Python
+  3.10-3.12 on Windows: `pip install --no-index --find-links wheels usd-core numpy pillow`. Kit installs Pillow
+  from there by itself if it is missing.
+
+An AI agent doing an assessment should follow `docs/AGENT_BRIEF.md`.

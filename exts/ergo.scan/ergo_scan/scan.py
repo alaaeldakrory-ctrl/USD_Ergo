@@ -49,6 +49,8 @@ _SIDE = {
     "hand": ["hand{s}", "{s}hand", "{S}hand", "{S}wrist", "wrist{s}"],
     "mid": ["middle01{s}", "middle1{s}", "{s}mid1", "{S}handmiddle1", "middle{s}", "{s}middle1", "{S}middle1",
             "index01{s}", "{s}index1", "{S}handindex1", "{S}index1"],
+    "index": ["index01{s}", "index1{s}", "{s}index1", "{S}handindex1", "{S}index1", "index{s}"],
+    "pinky": ["pinky01{s}", "pinky1{s}", "{s}pinky1", "{S}handpinky1", "{S}pinky1", "pinky{s}", "{S}little1"],
     "thigh": ["thigh{s}", "{s}thigh", "{S}upleg", "{S}thigh", "{S}hip", "upperleg{s}", "{S}upperleg"],
     "calf": ["calf{s}", "{s}calf", "{S}leg", "{S}knee", "lowerleg{s}", "{S}lowerleg", "{S}shin"],
     "foot": ["foot{s}", "{s}foot", "{S}ankle", "{S}foot"],          # SMPL: the ankle, not the toe joint
@@ -110,6 +112,101 @@ def _unit(v):
 
 
 UP = np.array([0.0, 1.0, 0.0])
+
+
+# joint ranges a person can reach (degrees, generous: beyond these the animation is physically wrong, not just
+# uncomfortable). Measured from joint positions only, so every rig is judged the same way.
+ANATOMY = {"elbow_flexion": 160.0, "forearm_rotation": 100.0, "wrist_flexion": 90.0, "wrist_deviation": 45.0,
+           "shoulder_rotation": 115.0, "trunk_twist": 65.0, "trunk_side": 50.0, "trunk_flexion": 115.0,
+           "neck_flexion": 75.0, "knee_backward_cm": 2.5, "hand_in_torso_cm": 8.0}
+
+
+def _perp(v, axis):
+    a = _unit(axis)
+    w = v - a * np.dot(v, a)
+    return w
+
+
+def _signed(a, b, axis):
+    """Signed angle (deg) from a to b about axis (both projected onto the plane normal to axis)."""
+    a, b = _unit(_perp(a, axis)), _unit(_perp(b, axis))
+    return math.degrees(math.atan2(float(np.dot(np.cross(a, b), _unit(axis))), float(np.dot(a, b))))
+
+
+def wrist_signed(J, s):
+    """(flexion, deviation) of the wrist, signed, deg - None without the knuckles."""
+    if f"index_{s}" not in J or f"pinky_{s}" not in J:
+        return None
+    F = J[f"hand_{s}"] - J[f"forearm_{s}"]
+    across = J[f"index_{s}"] - J[f"pinky_{s}"]
+    H = (J[f"index_{s}"] + J[f"pinky_{s}"]) / 2.0 - J[f"hand_{s}"]
+    n = np.cross(across, H)
+    return _signed(F, H, across), _signed(F, H, n)
+
+
+def anatomy_rest(Jb):
+    """The rig's own wrist angles in its bind pose (a straight wrist there), subtracted from every frame."""
+    out = {}
+    for s in "lr":
+        w = wrist_signed(Jb, s)
+        if w is not None:
+            out[f"wrist_flex_{s}"], out[f"wrist_dev_{s}"] = w
+    return out
+
+
+def anatomy(J, rest=None):
+    """Physically impossible joint use in one frame: {check: (value, limit)} for each one over its range.
+    J: role -> Y-up cm positions (index / pinky knuckles make the palm; without them the hand checks are skipped).
+    rest: anatomy_rest() of the rig."""
+    rest = rest or {}
+    out = {}
+    hip, ch = J["pelvis"], J["chest"]
+    up_t = _unit(ch - hip)
+    left = J["thigh_l"] - J["thigh_r"]
+    left = _unit(np.array([left[0], 0.0, left[2]]))
+    fwd = np.cross(left, UP)
+    fwd_t = _unit(_perp(fwd, up_t))
+
+    def over(name, v, lim):
+        if v > lim:
+            out[name] = (round(float(v), 1), lim)
+    a = frame_angles(J)
+    over("trunk_twist", a["trunk_twist"], ANATOMY["trunk_twist"])
+    over("trunk_side", a["trunk_side"], ANATOMY["trunk_side"])
+    over("trunk_flexion", abs(a["trunk"]), ANATOMY["trunk_flexion"])
+    over("neck_flexion", abs(a["neck"]), ANATOMY["neck_flexion"])
+    for s in "lr":
+        S_, E_, W_ = J[f"upperarm_{s}"], J[f"forearm_{s}"], J[f"hand_{s}"]
+        U, F = E_ - S_, W_ - E_
+        e = _ang(U, F)
+        over(f"elbow_flexion_{s}", e, ANATOMY["elbow_flexion"])
+        if e > 25.0:
+            # upper-arm (humeral) rotation: the forearm about the upper arm, 0 = forearm pointing forward
+            ref = fwd_t if abs(np.dot(_unit(U), fwd_t)) < 0.85 else up_t
+            psi = abs(_signed(ref, F, U))
+            over(f"shoulder_rotation_{s}", psi, ANATOMY["shoulder_rotation"])
+        if f"index_{s}" in J and f"pinky_{s}" in J and e > 25.0:
+            across = J[f"index_{s}"] - J[f"pinky_{s}"]              # thumb side of the palm
+            # forearm rotation: thumb side against the elbow plane (thumb up with the elbow bent = neutral)
+            phi = abs(_signed(-U, across, F))
+            over(f"forearm_rotation_{s}", phi, ANATOMY["forearm_rotation"])
+            fl, dv = wrist_signed(J, s)
+            flex = abs(fl - rest.get(f"wrist_flex_{s}", 0.0))
+            dev = abs(dv - rest.get(f"wrist_dev_{s}", 0.0))
+            over(f"wrist_flexion_{s}", flex, ANATOMY["wrist_flexion"])
+            over(f"wrist_deviation_{s}", dev, ANATOMY["wrist_deviation"])
+        # the hand inside the torso
+        seg = ch - hip
+        u = float(np.clip(np.dot(W_ - hip, seg) / max(1e-6, np.dot(seg, seg)), 0.0, 1.0))
+        d = float(np.linalg.norm(W_ - (hip + seg * u)))
+        if 0.05 < u < 0.95 and d < ANATOMY["hand_in_torso_cm"]:          # value: how close to the spine (cm)
+            out[f"hand_in_torso_{s}"] = (round(d, 1), ANATOMY["hand_in_torso_cm"])
+        # knee bending backwards
+        h, k, f_ = J[f"thigh_{s}"], J[f"calf_{s}"], J[f"foot_{s}"]
+        line = h + (f_ - h) * float(np.clip(np.dot(k - h, f_ - h) / max(1e-6, np.dot(f_ - h, f_ - h)), 0, 1))
+        back = -float(np.dot(k - line, fwd))
+        over(f"knee_backward_{s}", back, ANATOMY["knee_backward_cm"])
+    return out
 
 
 def frame_angles(J):
@@ -305,6 +402,7 @@ def scan_iter(stage, root="/World", step=1, frames=None, loads=None, repeated=()
             ab, upright = None, False
         rest = {"trunk": abs(ab["trunk"]) if upright else 0.0, "neck": abs(ab["neck"]) if upright else 0.0,
                 "wrist_l": ab["wrist_l"] if ab else 0.0, "wrist_r": ab["wrist_r"] if ab else 0.0}
+        arest = anatomy_rest(Jb)
         prev = []
         xc = UsdGeom.XformCache()
         for n_t, t in enumerate(times):
@@ -315,6 +413,7 @@ def scan_iter(stage, root="/World", step=1, frames=None, loads=None, repeated=()
             J = {r: conv(np.array(W[i].ExtractTranslation())) for r, i in idx.items()}
             a = frame_angles(J)
             row = score(a, rest, float(loads.get(name, 0.0)), name in repeated)
+            row["implausible"] = {k_: v_[0] for k_, v_ in anatomy(J, arest).items()}
             prev.append(J["pelvis"])
             back = prev[-min(len(prev), max(2, int(round(0.25 * fps / step))))]
             dt = max(1e-6, (len(prev[-max(2, int(round(0.25 * fps / step))):]) - 1) * step / fps)
@@ -394,7 +493,15 @@ def summarise(res, top=3):
                 d = driver(r).split(",")[0].split(" ")[0:2]
                 key = " ".join(d)
                 drivers[key] = drivers.get(key, 0) + 1
+        bad = [r for r in rows if r.get("implausible")]
+        why = {}
+        for r in bad:
+            for k_ in r["implausible"]:
+                k2 = k_[:-2] if k_.endswith(("_l", "_r")) else k_
+                why[k2] = why.get(k2, 0) + 1
         out.append({"operator": op["name"], "path": op["skelroot"], "frames": len(rows),
+                    "implausible_pct": round(100.0 * len(bad) / len(rows), 1),
+                    "implausible_top": dict(sorted(why.items(), key=lambda kv: -kv[1])[:4]),
                     "seconds": round(len(rows) * step / fps, 1), "median": int(np.median(sm)),
                     "p90": int(np.percentile(sm, 90)), "max": max(sm), "band_pct": bands,
                     "walking_pct": round(100.0 * sum(r["walking"] for r in rows) / len(rows), 1),

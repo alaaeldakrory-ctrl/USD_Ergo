@@ -1,0 +1,22 @@
+[package]
+title = "Ergo Scan"
+version = "0.1.0"
+description = "Ergonomic scan (RULA) of every animated operator in the open stage: report, HTML dashboard, score panels, floor map, viewport risk markers. No UI; call it from the Script Editor or a script (see AGENTS.md)."
+category = "Simulation"
+keywords = ["ergonomics", "rula", "people", "operators", "manufacturing"]
+authors = ["Alaa Eldakrory"]
+readme = "../../README.md"
+
+[dependencies]
+"omni.usd" = {}
+
+[[python.module]]
+name = "ergo_scan"
+
+# Pillow is only needed for the PNG dashboards (the HTML dashboard, report and markers work without it). Kit usually
+# ships it; on an air-gapped PC it installs from the bundle's wheels folder.
+[python.pipapi]
+requirements = ["pillow"]
+modules = ["PIL"]
+archiveDirs = ["../../wheels"]
+use_online_index = true

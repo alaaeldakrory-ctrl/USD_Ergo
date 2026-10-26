@@ -183,9 +183,35 @@ dash.composite_frames(res, r"<render folder>", r"<OUT>/frames_with_panel")
   - the scores describe the animated method, not measured people;
   - any skipped or static operators, and what you did about them.
 
+## 10. If you write or change operator animation
+
+Building or editing the animation (adding steps, new operators, new motions) is held to a separate standard.
+
+1. **Before you start**, read `docs/MOTION_RULES.md` completely. Keep every rule in mind while you formulate each
+   step: grips, free arms, kneeling, carrying, timing, clearance between operators. The first rule is absolute: no
+   person passes through an object, the floor or another person, with any body part or anything they hold.
+2. **After every change**, bake the animation to USD time samples and run the gate:
+
+   ```
+   python <ERGO>/tools/motion_check.py "<SCENE>" --out="<OUT>/motion_qa" --step=2
+   ```
+
+   Or in Kit: `from ergo_scan import motion_qa as Q; res = Q.check_stage(stage, "/World", step=2)`.
+3. **Fix every error** listed in `motion_qa.md` (each one has its frames and how to fix it), then run the gate
+   again. Repeat until it passes (exit code 0).
+4. **Fix or explain every warning.**
+5. **Check by eye** what the gate cannot see. For each new step, look at its worst frame from two sides: the hands
+   on the grip with fingers closed, the tool tip on the work and not through it, the posture choice, the gaze.
+6. **Only then** run the RULA scan, or show the animation to me.
+7. **In your report**, include the gate's summary line (PASS, errors 0) for the version you hand over.
+
+Do not loosen a limit in `motion_qa.py` to make a scene pass. If you believe a rule is wrong for a case, tell me
+which rule, which frames, and why.
+
 ## Rules
 
 - Report the tool's numbers; never round a 5 down to "acceptable".
+- Never hand over an animation that fails `tools/motion_check.py`.
 - Say plainly when something failed.
 - Use red only for the risk markers and for E-stops and fire equipment. Never colour equipment red or orange: in
   our plant red means a quality issue.

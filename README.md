@@ -24,6 +24,22 @@ python tools/ergo_scan.py C:/scenes/line.usd --out=C:/scenes/line_ergo --step=2 
   and dots on the back, shoulders and knees.
 - **`ergo_report.md` / `.json` / `ergo_frames.csv`**.
 
+## Motion QA: is the animation humanly possible?
+
+Before a scene is scored, its animation has to be something a person can actually do. `tools/motion_check.py`
+checks every operator, frame by frame:
+- nothing passes through equipment, the floor or another operator (legs and feet included);
+- held tools and parts stay out of the body;
+- no arms behind the back, no joints past their range, no snaps, no sliding feet.
+
+It writes `motion_qa.md` with each problem's frames and fix, and exits with code 1 until the scene is clean. The
+rules behind it, including the ones you check by eye, are in **`docs/MOTION_RULES.md`**. Read them before
+animating operators.
+
+```
+python tools/motion_check.py C:/scenes/line.usd --out=C:/scenes/line_motion_qa --step=2
+```
+
 ## How it scores
 
 - **Operators.** Every `UsdSkel` skeleton under the root is an operator. Names are taken from the scene, for

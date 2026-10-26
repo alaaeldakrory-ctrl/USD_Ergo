@@ -353,18 +353,25 @@ def find_operators(stage, root="/World"):
     return out
 
 
+ROLE_CAPSULES = [("pelvis", "chest", 13.0, 4, 1.0), ("chest", "neck", 10.0, 2, 1.0), ("head", "head", 10.0, 1, 1.0),
+                 ("upperarm_l", "forearm_l", 5.5, 3, 1.0), ("upperarm_r", "forearm_r", 5.5, 3, 1.0),
+                 ("forearm_l", "hand_l", 4.5, 2, 0.6), ("forearm_r", "hand_r", 4.5, 2, 0.6),
+                 ("thigh_l", "calf_l", 7.0, 3, 1.0), ("thigh_r", "calf_r", 7.0, 3, 1.0),
+                 ("calf_l", "foot_l", 5.5, 3, 0.85), ("calf_r", "foot_r", 5.5, 3, 0.85)]
+
+
 def scan(stage, root="/World", step=1, frames=None, loads=None, repeated=(), mapping=None, walk_cap=True,
-         only=None, log=print):
+         only=None, log=print, collide=False):
     """Score every operator. frames: (start, end) in stage time codes (default: the stage's range).
     loads: {operator: kg} handled while working; repeated: operators doing repeated cycles (+1 muscle use);
     mapping: {role: joint name} (or {operator: {role: joint name}}) for unusual rigs."""
-    for ev in scan_iter(stage, root, step, frames, loads, repeated, mapping, walk_cap, only, log):
+    for ev in scan_iter(stage, root, step, frames, loads, repeated, mapping, walk_cap, only, log, collide):
         if ev[0] == "done":
             return ev[1]
 
 
 def scan_iter(stage, root="/World", step=1, frames=None, loads=None, repeated=(), mapping=None, walk_cap=True,
-              only=None, log=print):
+              only=None, log=print, collide=False):
     """scan() step by step, for a UI that stays responsive: yields ("progress", operator name, operator index,
     operator count, fraction of this operator done) every few dozen frames, then ("done", result)."""
     from pxr import Usd, UsdGeom, UsdSkel
@@ -378,6 +385,14 @@ def scan_iter(stage, root="/World", step=1, frames=None, loads=None, repeated=()
     cache = UsdSkel.Cache()
     ops = []
     found = [f for f in find_operators(stage, root) if not only or f[0] in only]
+    start = stage.GetPrimAtPath(root) if root else stage.GetPseudoRoot()
+
+    def top_of(prim):                                    # the operator's own branch under the root (left out)
+        p = prim
+        while p.GetParent() and p.GetParent().GetPath() != start.GetPath():
+            p = p.GetParent()
+        return p.GetPath().pathString
+    exclude = tuple(top_of(sr) for _, sr, _ in found)
     for n_op, (name, sr, sk) in enumerate(found):
         yield ("progress", name, n_op, len(found), 0.0)
         cache.Populate(UsdSkel.Root(sr), Usd.TraverseInstanceProxies())
@@ -405,6 +420,15 @@ def scan_iter(stage, root="/World", step=1, frames=None, loads=None, repeated=()
         arest = anatomy_rest(Jb)
         prev = []
         xc = UsdGeom.XformCache()
+        geo, fields = None, {}
+        if collide:                                      # the body inside the scene's equipment, moment by moment
+            from .collide import SceneGeometry, region_around
+            track = []
+            for t in times[::max(1, len(times) // 40)]:
+                xc.SetTime(Usd.TimeCode(float(t)))
+                W = q.ComputeJointWorldTransforms(xc)
+                track.append(conv(np.array(W[idx["pelvis"]].ExtractTranslation())))
+            geo = SceneGeometry(stage, region_around(track), exclude)
         for n_t, t in enumerate(times):
             if n_t % 40 == 39:
                 yield ("progress", name, n_op, len(found), n_t / len(times))
@@ -414,6 +438,17 @@ def scan_iter(stage, root="/World", step=1, frames=None, loads=None, repeated=()
             a = frame_angles(J)
             row = score(a, rest, float(loads.get(name, 0.0)), name in repeated)
             row["implausible"] = {k_: v_[0] for k_, v_ in anatomy(J, arest).items()}
+            if geo is not None:
+                from .collide import body_points
+                b = 2.0 * fps
+                key = int(t // b) * b + b / 2
+                if key not in fields:
+                    fields.clear()
+                    fields[key] = geo.field_at(key)
+                pts, rad, part = body_points(J, capsules=ROLE_CAPSULES)
+                pen = fields[key].penetration((pts, rad, part))
+                if len(pen) and float(pen.max()) > 2.0:
+                    row["implausible"]["inside_equipment"] = round(float(pen.max()), 1)
             prev.append(J["pelvis"])
             back = prev[-min(len(prev), max(2, int(round(0.25 * fps / step))))]
             dt = max(1e-6, (len(prev[-max(2, int(round(0.25 * fps / step))):]) - 1) * step / fps)

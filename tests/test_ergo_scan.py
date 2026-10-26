@@ -49,3 +49,26 @@ def test_bands():
     assert upright["score"] <= 3, upright
     assert bent["score"] >= 5, bent
     assert "trunk bent" in E.driver(bent) or "arm raised" in E.driver(bent)
+
+
+def test_motion_rules_one_pose():
+    from ergo_scan import motion_qa as Q
+    ok = Q.check_pose(_body(), floor=0.0)
+    assert not ok, ok                                                  # a person standing at ease breaks nothing
+    J = _body()
+    sunk = {k: v - np.array([0.0, 100.0, 0.0]) for k, v in J.items()}   # the whole body sunk through the floor
+    hits = Q.check_pose(sunk, floor=0.0)
+    assert any(k.startswith("through_floor:knee") for k in hits) and "through_floor:pelvis" in hits, hits
+    back = dict(J)                                                     # the right hand drawn behind the back
+    back["forearm_r"] = J["upperarm_r"] + np.array([0.0, -20.0, -22.0])
+    back["hand_r"] = back["forearm_r"] + np.array([0.0, -5.0, -20.0])
+    assert "arm_behind_back:arm_r" in Q.check_pose(back, floor=0.0)
+
+
+def test_bodies_overlap():
+    from ergo_scan import motion_qa as Q
+    a = _body()
+    near = {k: v + np.array([20.0, 0.0, 0.0]) for k, v in a.items()}   # 20 cm apart: inside each other
+    far = {k: v + np.array([120.0, 0.0, 0.0]) for k, v in a.items()}
+    assert Q._bodies_overlap(a, near) > 2.0
+    assert Q._bodies_overlap(a, far) <= 0.0
